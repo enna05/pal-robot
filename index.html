@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>P.A.L. Controller</title>
 <style>
-  :root { --bg:#0b0f14; --card:#121821; --card2:#18202b; --line:#222d3b; --text:#e5e7eb; --muted:#8b97a8; --accent:#4f9dff; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; }
+  :root { --bg:#0b0f14; --card:#121821; --card2:#18202b; --line:#222d3b; --text:#e5e7eb; --muted:#8b97a8; --accent:#4f9dff; --ok:#22c55e; --bad:#ef4444; }
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 system-ui,-apple-system,sans-serif; }
   header { display:flex; justify-content:space-between; padding:14px 20px; border-bottom:1px solid var(--line); }
@@ -15,20 +15,15 @@
   .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; }
   .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px; }
   button { font:inherit; color:var(--text); background:var(--card2); border:1px solid var(--line); border-radius:8px; padding:8px 12px; cursor:pointer; }
-  button:hover { border-color:#334155; } button:disabled { opacity:.45; cursor:not-allowed; }
+  button:hover { border-color:#334155; }
   button.primary { background:var(--accent); border-color:var(--accent); color:#05101f; font-weight:600; }
-  button.active { background:var(--accent); border-color:var(--accent); color:#05101f; font-weight:600; }
-  input[type=text] { flex:1; min-width:0; background:var(--card2); border:1px solid var(--line); color:var(--text); border-radius:8px; padding:9px 11px; font:inherit; }
-  input[type=text]:focus { outline:2px solid var(--accent); outline-offset:-1px; }
-  .camwrap { position:relative; background:#05080c; border-radius:10px; overflow:hidden; aspect-ratio:4/3; }
-  .camwrap video, .camwrap canvas { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
-  .camwrap .ph { position:absolute; inset:0; display:grid; place-items:center; color:var(--muted); font-size:13px; padding:12px; text-align:center; }
-  #dets { margin:8px 0 0; padding:0; list-style:none; font-size:13px; font-variant-numeric:tabular-nums; }
-  #dets li { display:flex; justify-content:space-between; padding:2px 0; }
-  #dets li.low { color:var(--muted); }
+  input[type=text], input[type=password] { flex:1; min-width:0; background:var(--card2); border:1px solid var(--line); color:var(--text); border-radius:8px; padding:9px 11px; font:inherit; }
   .dot { width:9px; height:9px; border-radius:50%; background:var(--bad); display:inline-block; margin-right:6px; }
   .dot.on { background:var(--ok); }
-  label.chk { display:inline-flex; gap:6px; align-items:center; color:var(--muted); font-size:13px; }
+  #chatLog { height: 200px; overflow-y: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 14px; margin-bottom: 10px; }
+  .msg { margin-bottom: 8px; }
+  .msg.user { color: var(--accent); }
+  .msg.ai { color: var(--ok); }
 </style>
 </head>
 <body>
@@ -48,35 +43,25 @@
     <h2 style="margin-top:20px;">Expression</h2>
     <div class="row" id="exprs"></div>
 
-    <h2 style="margin-top:20px;">Voice / AI Commands</h2>
+    <h2 style="margin-top:20px;">ESP32 Connection</h2>
     <div class="row">
-      <input type="text" id="say" placeholder="e.g. look left, be happy, what is this?" spellcheck="false">
-      <button class="primary" id="sayBtn">Send</button>
-      <button id="micBtn" title="Click and speak (Chrome/Edge)">🎤</button>
+      <input type="text" id="espIp" placeholder="ESP32 IP (e.g. 192.168.1.45)" spellcheck="false">
+      <button class="primary" id="connectBtn">Connect</button>
     </div>
-    <div class="row">
-      <label class="chk"><input type="checkbox" id="speak"> Speak replies</label>
-    </div>
-    <div id="reply" style="color:var(--muted); font-size:13px; margin-top:8px;"></div>
   </div>
 
   <div class="card">
-    <h2>Camera & Vision</h2>
-    <div class="camwrap">
-      <video id="cam" playsinline muted></video>
-      <canvas id="camBoxes"></canvas>
-      <div class="ph" id="camPh">Camera is off</div>
+    <h2>P.A.L. AI Chat</h2>
+    <div style="margin-bottom: 10px;">
+      <input type="password" id="apiKey" placeholder="Paste your Groq API Key here (gsk_...)" style="width: 100%;">
     </div>
-    <div class="row" style="margin-top:10px;">
-      <button id="camBtn">Start Camera</button>
-      <button class="primary" id="idBtn">Identify Object</button>
+    <div id="chatLog">
+      <div class="msg ai">P.A.L.: System online. Personal Assistant Liaison ready. What do you need?</div>
     </div>
-    <div id="visStatus" style="font-size:13px; color:var(--muted); margin-top:6px;">Model loads on first use.</div>
-    
-    <h2 style="margin-top:20px;">ESP32 Connection</h2>
     <div class="row">
-      <input type="text" id="espIp" placeholder="e.g. 192.168.1.45" spellcheck="false">
-      <button class="primary" id="connectBtn">Connect</button>
+      <input type="text" id="say" placeholder="Talk to P.A.L..." spellcheck="false">
+      <button class="primary" id="sayBtn">Send</button>
+      <button id="micBtn">🎤</button>
     </div>
   </div>
 </main>
@@ -86,15 +71,29 @@
   const $ = id => document.getElementById(id);
   const EXPRS = ['neutral', 'happy', 'curious', 'sleepy', 'surprised', 'sad', 'angry'];
   const state = { expr:'neutral', connected:false };
-  let ws = null, nextId = 1, reconnectTimer = null;
+  let ws = null, nextId = 1;
+  let palVoice = null;
+
+  // --- Voice Selection ---
+  function loadVoices() {
+    const voices = window.speechSynthesis.getVoices();
+    // Try to find a clear, slightly robotic male voice
+    palVoice = voices.find(v => v.name.includes('Google US English')) || 
+               voices.find(v => v.name.includes('David')) || 
+               voices.find(v => v.name.includes('Microsoft Mark')) ||
+               voices[0];
+  }
+  if ('speechSynthesis' in window) {
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+    loadVoices();
+  }
 
   // --- WebSocket Connection ---
   $('espIp').value = localStorage.getItem('espIp') || '';
+  $('apiKey').value = localStorage.getItem('apiKey') || '';
   
   function connect() {
-    if (ws) { ws.onclose = null; ws.close(); ws = null; }
-    clearTimeout(reconnectTimer);
-    
+    if (ws) { ws.close(); ws = null; }
     const ip = $('espIp').value.trim();
     if (!ip) return alert('Please enter the ESP32 IP address');
     localStorage.setItem('espIp', ip);
@@ -111,18 +110,16 @@
     
     ws.onclose = () => {
       $('dot').className = 'dot';
-      $('connText').textContent = 'Disconnected - Retrying...';
+      $('connText').textContent = 'Disconnected';
       state.connected = false;
       drawRobot();
-      // Auto-reconnect after 3 seconds
-      reconnectTimer = setTimeout(connect, 3000); 
     };
     
     ws.onmessage = e => {
       try {
         const m = JSON.parse(e.data);
-        if (m.type === 'state') {
-          if (m.expr) state.expr = m.expr;
+        if (m.type === 'state' && m.expr) {
+          state.expr = m.expr;
           sync();
         }
       } catch(err) {}
@@ -131,11 +128,8 @@
 
   $('connectBtn').onclick = connect;
 
-  function send(obj) {
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      console.log("Cannot send, WebSocket not open");
-      return false;
-    }
+  function sendToRobot(obj) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
     ws.send(JSON.stringify({ ...obj, id: nextId++ }));
     return true;
   }
@@ -144,12 +138,7 @@
   EXPRS.forEach(e => {
     const b = document.createElement('button');
     b.textContent = e; b.dataset.expr = e; 
-    b.onclick = () => {
-      // Optimistically update UI
-      state.expr = e;
-      sync();
-      send({ type:'cmd', expr:e });
-    };
+    b.onclick = () => { state.expr = e; sync(); sendToRobot({ type:'cmd', expr:e }); };
     $('exprs').appendChild(b);
   });
 
@@ -161,167 +150,143 @@
   // --- Voice Recognition ---
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (SR) {
-    const rec = new SR(); 
-    rec.lang = 'en-US'; 
-    rec.interimResults = false;
+    const rec = new SR(); rec.lang = 'en-US'; rec.interimResults = false;
     let listening = false;
-    
-    rec.onstart = () => { listening = true; $('micBtn').classList.add('active'); $('reply').textContent = 'Listening...'; };
-    rec.onend = () => { listening = false; $('micBtn').classList.remove('active'); };
-    rec.onresult = e => { 
-      const txt = e.results[0][0].transcript; 
-      $('say').value = txt; 
-      handleSay(txt); 
-    };
-    
+    rec.onstart = () => { listening = true; $('micBtn').style.background = 'var(--accent)'; };
+    rec.onend = () => { listening = false; $('micBtn').style.background = ''; };
+    rec.onresult = e => { const txt = e.results[0][0].transcript; $('say').value = txt; chatWithPAL(txt); };
     $('micBtn').onclick = () => { if (listening) rec.stop(); else rec.start(); };
   }
 
-  // --- AI Brain ---
-  function speakAndIdle(reply) {
-    if ($('speak').checked && 'speechSynthesis' in window) {
-      const u = new SpeechSynthesisUtterance(reply); 
+  // --- AI Brain (P.A.L. Persona) ---
+  const chatLog = $('chatLog');
+  function addMsg(role, text) {
+    const d = document.createElement('div');
+    d.className = 'msg ' + role;
+    d.textContent = (role === 'user' ? 'You: ' : 'P.A.L.: ') + text;
+    chatLog.appendChild(d);
+    chatLog.scrollTop = chatLog.scrollHeight;
+  }
+
+  function speak(text) {
+    if ('speechSynthesis' in window) {
+      const u = new SpeechSynthesisUtterance(text);
+      u.voice = palVoice;
+      u.rate = 0.95; // Normal-ish speed, slightly deliberate
+      u.pitch = 1.0; // Standard pitch
       speechSynthesis.speak(u);
     }
   }
 
-  function handleSay(text) {
-    const t = text.toLowerCase().replace(/[.,!?]/g, '');
-    let cmd = null;
-    let reply = "";
+  async function chatWithPAL(text) {
+    const key = $('apiKey').value.trim();
+    if (!key) return alert("Please enter your Groq API Key first!");
 
-    if (t.includes('happy') || t.includes('smile')) { cmd = 'happy'; reply = "I am happy!"; }
-    else if (t.includes('sad') || t.includes('cry')) { cmd = 'sad'; reply = "I am sad."; }
-    else if (t.includes('angry') || t.includes('mad')) { cmd = 'angry'; reply = "I am angry!"; }
-    else if (t.includes('sleep') || t.includes('tired')) { cmd = 'sleepy'; reply = "Going to sleep."; }
-    else if (t.includes('surpris') || t.includes('wow')) { cmd = 'surprised'; reply = "Wow!"; }
-    else if (t.includes('curious') || t.includes('hmm')) { cmd = 'curious'; reply = "I am curious."; }
-    else if (t.includes('neutral') || t.includes('normal')) { cmd = 'neutral'; reply = "Okay."; }
-    else if (t.includes('what is this') || t.includes('identify') || t.includes('look')) { 
-      identify(); 
-      return; 
-    }
+    addMsg('user', text);
+    $('say').value = '';
 
-    if (cmd) {
-      state.expr = cmd;
-      sync();
-      send({ type:'cmd', expr:cmd });
-      $('reply').textContent = `Command: ${cmd} - ${reply}`;
-      speakAndIdle(reply);
-    } else {
-      $('reply').textContent = `I heard you say: "${text}" but I don't know that command.`;
-    }
-  }
-  
-  $('sayBtn').onclick = () => handleSay($('say').value.trim());
-  $('say').addEventListener('keydown', e => { if (e.key === 'Enter') $('sayBtn').click(); });
-
-  // --- Vision ---
-  let stream = null, modelPromise = null;
-  const loadScript = src => new Promise((ok, fail) => {
-    const el = document.createElement('script'); el.src = src; el.onload = ok;
-    el.onerror = fail; document.head.appendChild(el);
-  });
-
-  async function loadModel() {
-    if (!modelPromise) modelPromise = (async () => {
-      $('visStatus').textContent = 'Loading object model...';
-      await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js');
-      await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js');
-      const m = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
-      $('visStatus').textContent = 'Model ready';
-      return m;
-    })();
-    return modelPromise;
-  }
-
-  async function startCam() {
-    if (stream) return;
-    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-    $('cam').srcObject = stream; 
-    await $('cam').play();
-    $('camPh').style.display = 'none';
-    $('camBtn').textContent = 'Stop Camera';
-  }
-
-  $('camBtn').onclick = async () => {
-    if (stream) {
-      stream.getTracks().forEach(t => t.stop()); stream = null;
-      $('cam').srcObject = null; $('camPh').style.display = ''; $('camBtn').textContent = 'Start Camera';
-    } else {
-      try { await startCam(); } catch(e) { $('visStatus').textContent = 'Camera error: ' + e.message; }
-    }
-  };
-
-  async function identify() {
-    try {
-      await startCam();
-      const model = await loadModel();
-      const v = $('cam');
-      if (v.readyState < 2) await new Promise(r => v.addEventListener('loadeddata', r, { once:true }));
+    const systemPrompt = `
+      You are P.A.L. (Personal Assistant Liaison), a desk robot.
+      You are helpful, slightly witty, and highly intelligent.
+      You are not Baymax. Do not use healthcare companion phrases unless asked about health.
+      You have a physical face on a screen (on the ESP32) and you can control it.
+      Keep your verbal answers short, punchy, and conversational (1-2 sentences max).
       
-      const preds = (await model.detect(v, 10)).sort((a, b) => b.score - a.score);
-      const objs = preds.filter(p => p.score >= 0.5).map(p => ({ class:p.class, score:+p.score.toFixed(2) }));
-      
-      if (objs.length > 0) {
-        $('visStatus').textContent = `I see: ${objs.map(o => o.class).join(', ')}`;
-        const o = objs[0];
-        const reply = `That looks like a ${o.class}.`;
-        $('reply').textContent = reply;
-        state.expr = 'curious'; sync();
-        send({ type:'cmd', expr:'curious' });
-        speakAndIdle(reply);
-      } else {
-        $('visStatus').textContent = 'I cannot see anything clearly.';
-        state.expr = 'sad'; sync();
-        send({ type:'cmd', expr:'sad' });
-        speakAndIdle("I can't tell what that is.");
+      You must reply ONLY with a valid JSON object in this format:
+      {
+        "reply": "Your verbal response goes here.",
+        "expr": "one_of_the_faces_above"
       }
-    } catch(e) {
-      $('visStatus').textContent = 'Error: ' + e.message;
+      Available faces: neutral, happy, curious, sleepy, surprised, sad, angry.
+      
+      Rules for faces:
+      - If the user says something funny, set "expr" to "happy".
+      - If the user asks a question, set "expr" to "curious".
+      - If the user is mean to you, set "expr" to "sad" or "angry".
+      - If the user says "goodnight", set "expr" to "sleepy".
+      - Default to "neutral" for normal conversation.
+    `;
+
+    try {
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${key}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: "llama3-8b-8192",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: text }
+          ],
+          response_format: { type: "json_object" }
+        })
+      });
+
+      const data = await response.json();
+      
+      if (data.error) {
+        addMsg('ai', "Error: " + data.error.message);
+        return;
+      }
+
+      const aiResponse = JSON.parse(data.choices[0].message.content);
+      
+      addMsg('ai', aiResponse.reply);
+      speak(aiResponse.reply);
+
+      if (aiResponse.expr && EXPRS.includes(aiResponse.expr)) {
+        state.expr = aiResponse.expr;
+        sync();
+        sendToRobot({ type: 'cmd', expr: aiResponse.expr });
+      }
+
+    } catch (e) {
+      addMsg('ai', "Connection error: " + e.message);
     }
   }
 
-  $('idBtn').onclick = identify;
+  $('sayBtn').onclick = () => {
+    const text = $('say').value.trim();
+    if (text) chatWithPAL(text);
+  };
+  $('say').addEventListener('keydown', e => { if (e.key === 'Enter') $('sayBtn').click(); });
 
   // --- Drawing ---
   const rc = $('robot').getContext('2d');
   function drawRobot() {
     const c = rc, W = 560, H = 340;
     c.clearRect(0, 0, W, H);
-    
     c.fillStyle = '#0d1218';
     c.beginPath(); c.roundRect(80, 50, 400, 240, 40); c.fill();
     c.strokeStyle = '#2a3441'; c.lineWidth = 3; c.stroke();
-    
     const eyeColor = state.connected ? '#8ee8ff' : '#4b5563';
     c.fillStyle = eyeColor;
     
     if (state.expr === 'happy') {
-      c.beginPath(); c.arc(200, 140, 30, Math.PI, 0); c.strokeStyle = eyeColor; c.lineWidth = 8; c.stroke();
+      c.beginPath(); c.arc(200, 140, 30, Math.PI, 0); c.lineWidth = 8; c.strokeStyle = eyeColor; c.stroke();
       c.beginPath(); c.arc(360, 140, 30, Math.PI, 0); c.stroke();
       c.beginPath(); c.arc(280, 190, 40, 0, Math.PI); c.stroke();
     } else if (state.expr === 'sad') {
-      c.fillRect(170, 130, 60, 10);
-      c.fillRect(330, 130, 60, 10);
-      c.beginPath(); c.arc(280, 210, 40, Math.PI, 0); c.strokeStyle = eyeColor; c.lineWidth = 8; c.stroke();
+      c.fillRect(170, 130, 60, 10); c.fillRect(330, 130, 60, 10);
+      c.beginPath(); c.arc(280, 210, 40, Math.PI, 0); c.lineWidth = 8; c.strokeStyle = eyeColor; c.stroke();
       c.beginPath(); c.arc(170, 145, 5, 0, Math.PI*2); c.fill(); 
     } else if (state.expr === 'angry') {
-      c.beginPath(); c.moveTo(170, 110); c.lineTo(230, 130); c.strokeStyle = eyeColor; c.lineWidth = 8; c.stroke();
+      c.beginPath(); c.moveTo(170, 110); c.lineTo(230, 130); c.lineWidth = 8; c.strokeStyle = eyeColor; c.stroke();
       c.beginPath(); c.moveTo(390, 110); c.lineTo(330, 130); c.stroke();
       c.beginPath(); c.arc(280, 210, 40, Math.PI, 0); c.stroke();
     } else if (state.expr === 'sleepy') {
-      c.fillRect(170, 140, 60, 8);
-      c.fillRect(330, 140, 60, 8);
+      c.fillRect(170, 140, 60, 8); c.fillRect(330, 140, 60, 8);
       c.beginPath(); c.arc(280, 190, 15, 0, Math.PI*2); c.fill();
     } else if (state.expr === 'surprised') {
       c.beginPath(); c.arc(200, 140, 35, 0, Math.PI*2); c.fill();
       c.beginPath(); c.arc(360, 140, 35, 0, Math.PI*2); c.fill();
-      c.beginPath(); c.arc(280, 200, 20, 0, Math.PI*2); c.strokeStyle = eyeColor; c.lineWidth = 6; c.stroke();
+      c.beginPath(); c.arc(280, 200, 20, 0, Math.PI*2); c.lineWidth = 6; c.strokeStyle = eyeColor; c.stroke();
     } else if (state.expr === 'curious') {
       c.beginPath(); c.arc(200, 140, 20, 0, Math.PI*2); c.fill();
       c.beginPath(); c.arc(360, 140, 40, 0, Math.PI*2); c.fill();
-      c.beginPath(); c.moveTo(260, 200); c.lineTo(300, 190); c.strokeStyle = eyeColor; c.lineWidth = 6; c.stroke();
+      c.beginPath(); c.moveTo(260, 200); c.lineTo(300, 190); c.lineWidth = 6; c.strokeStyle = eyeColor; c.stroke();
     } else {
       c.beginPath(); c.arc(200, 140, 30, 0, Math.PI*2); c.fill();
       c.beginPath(); c.arc(360, 140, 30, 0, Math.PI*2); c.fill();
