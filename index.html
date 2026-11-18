@@ -71,7 +71,7 @@
     <details>
       <summary>AI Settings (Gemini)</summary>
       <div class="row" style="margin-top: 8px;">
-        <input type="password" id="apiKey" placeholder="Paste Gemini API Key here (AIza...)" style="width: 100%;">
+        <input type="password" id="apiKey" placeholder="Paste Gemini API Key here (gen...)" style="width: 100%;">
         <button class="primary" id="saveKeyBtn" style="width: 100%;">Save Key</button>
       </div>
     </details>
@@ -242,37 +242,12 @@
     $('pitchVal').textContent = e.target.value;
   });
 
-  // Local Fallback Logic (Includes ALL faces)
-  function localFallback(text) {
-    const t = text.toLowerCase();
-    let localCmd = null;
-    let reply = "";
-
-    if (t.includes('happy') || t.includes('smile') || t.includes('glad')) { localCmd = 'happy'; reply = "I am happy!"; }
-    else if (t.includes('sad') || t.includes('cry')) { localCmd = 'sad'; reply = "I am sad."; }
-    else if (t.includes('angry') || t.includes('mad') || t.includes('furious')) { localCmd = 'angry'; reply = "I am angry!"; }
-    else if (t.includes('sleep') || t.includes('tired')) { localCmd = 'sleepy'; reply = "Going to sleep."; }
-    else if (t.includes('surpris') || t.includes('wow')) { localCmd = 'surprised'; reply = "Wow!"; }
-    else if (t.includes('curious') || t.includes('wonder')) { localCmd = 'curious'; reply = "I am curious."; }
-    else if (t.includes('neutral') || t.includes('normal')) { localCmd = 'neutral'; reply = "Okay."; }
-    else if (t.includes('hello') || t.includes('hi')) { reply = "Hello! I am P.A.L."; }
-    else { reply = "My AI brain is offline, but I can still change faces!"; }
-
-    if (localCmd) {
-      state.expr = localCmd;
-      sync();
-      send({ type:'cmd', expr:localCmd });
-    }
-    addMsg('ai', reply);
-    speakAndIdle(reply);
-  }
-
   async function handleSay(text) {
     if (!text) return;
     
     const t = text.toLowerCase().replace(/\b(paul|pall|pale)\b/g, 'pal');
     
-    // 1. FAST LOCAL COMMANDS (Instant face change, no AI needed)
+    // 1. FAST LOCAL COMMANDS
     let localCmd = null;
     if (t.includes('happy') || t.includes('smile') || t.includes('glad')) localCmd = 'happy';
     else if (t.includes('sad') || t.includes('cry')) localCmd = 'sad';
@@ -291,7 +266,7 @@
       addMsg('ai', reply);
       speakAndIdle(reply);
       $('say').value = '';
-      return; // Stop here, don't ask AI
+      return; 
     }
 
     addMsg('user', text);
@@ -304,10 +279,11 @@
       return; 
     }
 
-    // 3. AI Processing (Gemini)
+    // 3. AI Processing (Gemini via CORS proxy)
     const key = $('apiKey').value.trim();
     if (!key) {
-      localFallback(text);
+      addMsg('ai', "Please enter your Gemini key in AI Settings.");
+      speakAndIdle("Please enter your key.");
       return;
     }
 
@@ -332,7 +308,11 @@
     `;
 
     try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`, {
+      // Use corsproxy to bypass browser restrictions
+      const proxyUrl = 'https://corsproxy.io/?';
+      const geminiUrl = encodeURIComponent(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`);
+      
+      const response = await fetch(proxyUrl + geminiUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -344,8 +324,8 @@
       const data = await response.json();
       
       if (data.error) {
-        console.warn("Gemini Error:", data.error);
-        localFallback(text);
+        addMsg('ai', "Gemini Error: " + data.error.message);
+        $('reply').textContent = "Error from Gemini AI.";
         return;
       }
 
@@ -364,7 +344,8 @@
 
     } catch (e) {
       console.warn("Fetch failed:", e);
-      localFallback(text);
+      addMsg('ai', "Network error: " + e.message);
+      speakAndIdle("My AI brain is offline.");
     }
   }
   
