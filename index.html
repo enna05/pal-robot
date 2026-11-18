@@ -70,8 +70,9 @@
 
     <details>
       <summary>AI Settings (Gemini)</summary>
-      <div style="margin-top: 8px;">
+      <div class="row" style="margin-top: 8px;">
         <input type="password" id="apiKey" placeholder="Paste Gemini API Key here (AIza...)" style="width: 100%;">
+        <button class="primary" id="saveKeyBtn" style="width: 100%;">Save Key</button>
       </div>
     </details>
 
@@ -126,6 +127,16 @@
   $('espIp').value = localStorage.getItem('espIp') || '';
   $('apiKey').value = localStorage.getItem('apiKey') || '';
   
+  // Save Key Listener
+  $('saveKeyBtn').onclick = () => {
+    const key = $('apiKey').value.trim();
+    if (key) {
+      localStorage.setItem('apiKey', key);
+      alert("API Key saved successfully!");
+      $('reply').textContent = "API Key saved. You can now talk to me.";
+    }
+  };
+
   function connect() {
     if (ws) { ws.onclose = null; ws.close(); ws = null; }
     clearTimeout(reconnectTimer);
@@ -222,7 +233,7 @@
     if ($('speak').checked && 'speechSynthesis' in window) {
       const u = new SpeechSynthesisUtterance(reply); 
       u.voice = palVoice;
-      u.rate = 0.95; // Slower, more natural
+      u.rate = 0.95; 
       u.pitch = parseFloat($('pitch').value); 
       speechSynthesis.speak(u);
     }
@@ -274,7 +285,6 @@
       localFallback(text);
       return;
     }
-    localStorage.setItem('apiKey', key);
 
     const systemPrompt = `
       You are P.A.L. (Personal Assistant Liaison), a smart, helpful desk robot.
@@ -310,7 +320,7 @@
       
       if (data.error) {
         console.warn("Gemini Error:", data.error);
-        localFallback(text); // Trigger fallback if API fails
+        localFallback(text);
         return;
       }
 
@@ -329,7 +339,7 @@
 
     } catch (e) {
       console.warn("Fetch failed:", e);
-      localFallback(text); // Trigger fallback if network fails
+      localFallback(text);
     }
   }
   
