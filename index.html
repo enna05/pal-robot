@@ -86,13 +86,15 @@
   const $ = id => document.getElementById(id);
   const EXPRS = ['neutral', 'happy', 'curious', 'sleepy', 'surprised', 'sad', 'angry'];
   const state = { expr:'neutral', connected:false };
-  let ws = null, nextId = 1;
+  let ws = null, nextId = 1, reconnectTimer = null;
 
   // --- WebSocket Connection ---
   $('espIp').value = localStorage.getItem('espIp') || '';
   
   function connect() {
-    if (ws) { ws.close(); ws = null; }
+    if (ws) { ws.onclose = null; ws.close(); ws = null; }
+    clearTimeout(reconnectTimer);
+    
     const ip = $('espIp').value.trim();
     if (!ip) return alert('Please enter the ESP32 IP address');
     localStorage.setItem('espIp', ip);
@@ -104,12 +106,16 @@
       $('dot').className = 'dot on';
       $('connText').textContent = 'Connected';
       state.connected = true;
+      drawRobot();
     };
     
     ws.onclose = () => {
       $('dot').className = 'dot';
-      $('connText').textContent = 'Disconnected';
+      $('connText').textContent = 'Disconnected - Retrying...';
       state.connected = false;
+      drawRobot();
+      // Auto-reconnect after 3 seconds
+      reconnectTimer = setTimeout(connect, 3000); 
     };
     
     ws.onmessage = e => {
@@ -126,7 +132,10 @@
   $('connectBtn').onclick = connect;
 
   function send(obj) {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      console.log("Cannot send, WebSocket not open");
+      return false;
+    }
     ws.send(JSON.stringify({ ...obj, id: nextId++ }));
     return true;
   }
@@ -135,7 +144,12 @@
   EXPRS.forEach(e => {
     const b = document.createElement('button');
     b.textContent = e; b.dataset.expr = e; 
-    b.onclick = () => send({ type:'cmd', expr:e });
+    b.onclick = () => {
+      // Optimistically update UI
+      state.expr = e;
+      sync();
+      send({ type:'cmd', expr:e });
+    };
     $('exprs').appendChild(b);
   });
 
@@ -176,22 +190,21 @@
     let cmd = null;
     let reply = "";
 
-    // Check for expressions (using root words so "be curious" works)
-    if (t.includes('happy') || t.includes('smile') || t.includes('glad')) { cmd = 'happy'; reply = "I am happy!"; }
+    if (t.includes('happy') || t.includes('smile')) { cmd = 'happy'; reply = "I am happy!"; }
     else if (t.includes('sad') || t.includes('cry')) { cmd = 'sad'; reply = "I am sad."; }
     else if (t.includes('angry') || t.includes('mad')) { cmd = 'angry'; reply = "I am angry!"; }
     else if (t.includes('sleep') || t.includes('tired')) { cmd = 'sleepy'; reply = "Going to sleep."; }
     else if (t.includes('surpris') || t.includes('wow')) { cmd = 'surprised'; reply = "Wow!"; }
-    else if (t.includes('curious') || t.includes('hmm') || t.includes('wonder')) { cmd = 'curious'; reply = "I am curious."; }
-    else if (t.includes('neutral') || t.includes('normal') || t.includes('calm')) { cmd = 'neutral'; reply = "Okay."; }
-    
-    // Check for vision commands
+    else if (t.includes('curious') || t.includes('hmm')) { cmd = 'curious'; reply = "I am curious."; }
+    else if (t.includes('neutral') || t.includes('normal')) { cmd = 'neutral'; reply = "Okay."; }
     else if (t.includes('what is this') || t.includes('identify') || t.includes('look')) { 
       identify(); 
       return; 
     }
 
     if (cmd) {
+      state.expr = cmd;
+      sync();
       send({ type:'cmd', expr:cmd });
       $('reply').textContent = `Command: ${cmd} - ${reply}`;
       speakAndIdle(reply);
@@ -203,7 +216,7 @@
   $('sayBtn').onclick = () => handleSay($('say').value.trim());
   $('say').addEventListener('keydown', e => { if (e.key === 'Enter') $('sayBtn').click(); });
 
-  // --- Vision (COCO-SSD) ---
+  // --- Vision ---
   let stream = null, modelPromise = null;
   const loadScript = src => new Promise((ok, fail) => {
     const el = document.createElement('script'); el.src = src; el.onload = ok;
@@ -235,7 +248,6 @@
     if (stream) {
       stream.getTracks().forEach(t => t.stop()); stream = null;
       $('cam').srcObject = null; $('camPh').style.display = ''; $('camBtn').textContent = 'Start Camera';
-      $('camBoxes').getContext('2d').clearRect(0, 0, 9999, 9999);
     } else {
       try { await startCam(); } catch(e) { $('visStatus').textContent = 'Camera error: ' + e.message; }
     }
@@ -256,10 +268,12 @@
         const o = objs[0];
         const reply = `That looks like a ${o.class}.`;
         $('reply').textContent = reply;
+        state.expr = 'curious'; sync();
         send({ type:'cmd', expr:'curious' });
         speakAndIdle(reply);
       } else {
         $('visStatus').textContent = 'I cannot see anything clearly.';
+        state.expr = 'sad'; sync();
         send({ type:'cmd', expr:'sad' });
         speakAndIdle("I can't tell what that is.");
       }
@@ -291,7 +305,7 @@
       c.fillRect(170, 130, 60, 10);
       c.fillRect(330, 130, 60, 10);
       c.beginPath(); c.arc(280, 210, 40, Math.PI, 0); c.strokeStyle = eyeColor; c.lineWidth = 8; c.stroke();
-      c.beginPath(); c.arc(170, 145, 5, 0, Math.PI*2); c.fill(); // tear
+      c.beginPath(); c.arc(170, 145, 5, 0, Math.PI*2); c.fill(); 
     } else if (state.expr === 'angry') {
       c.beginPath(); c.moveTo(170, 110); c.lineTo(230, 130); c.strokeStyle = eyeColor; c.lineWidth = 8; c.stroke();
       c.beginPath(); c.moveTo(390, 110); c.lineTo(330, 130); c.stroke();
