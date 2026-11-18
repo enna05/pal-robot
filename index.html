@@ -18,8 +18,8 @@
   button:hover { border-color:#334155; } button:disabled { opacity:.45; cursor:not-allowed; }
   button.primary { background:var(--accent); border-color:var(--accent); color:#05101f; font-weight:600; }
   button.active { background:var(--accent); border-color:var(--accent); color:#05101f; font-weight:600; }
-  input[type=text], input[type=password] { flex:1; min-width:0; background:var(--card2); border:1px solid var(--line); color:var(--text); border-radius:8px; padding:9px 11px; font:inherit; }
-  input[type=text]:focus, input[type=password]:focus { outline:2px solid var(--accent); outline-offset:-1px; }
+  input[type=text] { flex:1; min-width:0; background:var(--card2); border:1px solid var(--line); color:var(--text); border-radius:8px; padding:9px 11px; font:inherit; }
+  input[type=text]:focus { outline:2px solid var(--accent); outline-offset:-1px; }
   .camwrap { position:relative; background:#05080c; border-radius:10px; overflow:hidden; aspect-ratio:4/3; }
   .camwrap video, .camwrap canvas { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
   .camwrap .ph { position:absolute; inset:0; display:grid; place-items:center; color:var(--muted); font-size:13px; padding:12px; text-align:center; }
@@ -29,10 +29,6 @@
   .dot { width:9px; height:9px; border-radius:50%; background:var(--bad); display:inline-block; margin-right:6px; }
   .dot.on { background:var(--ok); }
   label.chk { display:inline-flex; gap:6px; align-items:center; color:var(--muted); font-size:13px; }
-  #chatLog { height: 120px; overflow-y: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 13px; margin-bottom: 10px; font-family: monospace; }
-  .msg { margin-bottom: 4px; }
-  .msg.user { color: var(--accent); }
-  .msg.ai { color: var(--ok); }
 </style>
 </head>
 <body>
@@ -53,19 +49,13 @@
     <div class="row" id="exprs"></div>
 
     <h2 style="margin-top:20px;">Voice / AI Commands</h2>
-    <div style="margin-bottom: 8px;">
-      <input type="password" id="apiKey" placeholder="Paste Groq API Key here (gsk_...)" style="width: 100%;">
-    </div>
-    <div id="chatLog">
-      <div class="msg ai">P.A.L.: System online. Personal Assistant Liaison ready.</div>
-    </div>
     <div class="row">
-      <input type="text" id="say" placeholder="Talk to P.A.L..." spellcheck="false">
+      <input type="text" id="say" placeholder="e.g. look left, be happy, what is this?" spellcheck="false">
       <button class="primary" id="sayBtn">Send</button>
       <button id="micBtn" title="Click and speak (Chrome/Edge)">🎤</button>
     </div>
     <div class="row">
-      <label class="chk"><input type="checkbox" id="speak" checked> Speak replies</label>
+      <label class="chk"><input type="checkbox" id="speak"> Speak replies</label>
     </div>
     <div id="reply" style="color:var(--muted); font-size:13px; margin-top:8px;"></div>
   </div>
@@ -97,24 +87,9 @@
   const EXPRS = ['neutral', 'happy', 'curious', 'sleepy', 'surprised', 'sad', 'angry'];
   const state = { expr:'neutral', connected:false };
   let ws = null, nextId = 1, reconnectTimer = null;
-  let palVoice = null;
-
-  // --- Voice Selection ---
-  function loadVoices() {
-    const voices = window.speechSynthesis.getVoices();
-    palVoice = voices.find(v => v.name.includes('Google US English')) || 
-               voices.find(v => v.name.includes('David')) || 
-               voices.find(v => v.lang === 'en-US' && v.name.includes('Male')) ||
-               voices[0];
-  }
-  if ('speechSynthesis' in window) {
-    window.speechSynthesis.onvoiceschanged = loadVoices;
-    loadVoices();
-  }
 
   // --- WebSocket Connection ---
   $('espIp').value = localStorage.getItem('espIp') || '';
-  $('apiKey').value = localStorage.getItem('apiKey') || '';
   
   function connect() {
     if (ws) { ws.onclose = null; ws.close(); ws = null; }
@@ -139,6 +114,7 @@
       $('connText').textContent = 'Disconnected - Retrying...';
       state.connected = false;
       drawRobot();
+      // Auto-reconnect after 3 seconds
       reconnectTimer = setTimeout(connect, 3000); 
     };
     
@@ -156,7 +132,10 @@
   $('connectBtn').onclick = connect;
 
   function send(obj) {
-    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      console.log("Cannot send, WebSocket not open");
+      return false;
+    }
     ws.send(JSON.stringify({ ...obj, id: nextId++ }));
     return true;
   }
@@ -166,6 +145,7 @@
     const b = document.createElement('button');
     b.textContent = e; b.dataset.expr = e; 
     b.onclick = () => {
+      // Optimistically update UI
       state.expr = e;
       sync();
       send({ type:'cmd', expr:e });
@@ -198,98 +178,38 @@
   }
 
   // --- AI Brain ---
-  const chatLog = $('chatLog');
-  function addMsg(role, text) {
-    const d = document.createElement('div');
-    d.className = 'msg ' + role;
-    d.textContent = (role === 'user' ? 'You: ' : 'P.A.L.: ') + text;
-    chatLog.appendChild(d);
-    chatLog.scrollTop = chatLog.scrollHeight;
-  }
-
   function speakAndIdle(reply) {
     if ($('speak').checked && 'speechSynthesis' in window) {
       const u = new SpeechSynthesisUtterance(reply); 
-      u.voice = palVoice;
-      u.rate = 0.95;
-      u.pitch = 1.0;
       speechSynthesis.speak(u);
     }
   }
 
-  async function handleSay(text) {
-    if (!text) return;
-    addMsg('user', text);
-    $('say').value = '';
-    $('reply').textContent = 'Thinking...';
+  function handleSay(text) {
+    const t = text.toLowerCase().replace(/[.,!?]/g, '');
+    let cmd = null;
+    let reply = "";
 
-    const key = $('apiKey').value.trim();
-    if (!key) {
-      $('reply').textContent = "Please enter your Groq API key first!";
-      return;
+    if (t.includes('happy') || t.includes('smile')) { cmd = 'happy'; reply = "I am happy!"; }
+    else if (t.includes('sad') || t.includes('cry')) { cmd = 'sad'; reply = "I am sad."; }
+    else if (t.includes('angry') || t.includes('mad')) { cmd = 'angry'; reply = "I am angry!"; }
+    else if (t.includes('sleep') || t.includes('tired')) { cmd = 'sleepy'; reply = "Going to sleep."; }
+    else if (t.includes('surpris') || t.includes('wow')) { cmd = 'surprised'; reply = "Wow!"; }
+    else if (t.includes('curious') || t.includes('hmm')) { cmd = 'curious'; reply = "I am curious."; }
+    else if (t.includes('neutral') || t.includes('normal')) { cmd = 'neutral'; reply = "Okay."; }
+    else if (t.includes('what is this') || t.includes('identify') || t.includes('look')) { 
+      identify(); 
+      return; 
     }
-    localStorage.setItem('apiKey', key);
 
-    const systemPrompt = `
-      You are P.A.L. (Personal Assistant Liaison), a smart, helpful desk robot.
-      You are highly intelligent, slightly witty, and you speak confidently and clearly.
-      You are a productivity companion.
-      Keep your verbal answers short, punchy, and conversational (1-2 sentences max).
-      
-      You must reply ONLY with a valid JSON object in this format:
-      {
-        "reply": "Your verbal response goes here.",
-        "expr": "one_of_the_faces_above"
-      }
-      Available faces: neutral, happy, curious, sleepy, surprised, sad, angry.
-      
-      Rules for faces:
-      - If the user says something funny, set "expr" to "happy".
-      - If the user asks a question, set "expr" to "curious".
-      - If the user is mean to you, set "expr" to "sad" or "angry".
-      - If the user says "goodnight", set "expr" to "sleepy".
-      - Default to "neutral" for normal conversation.
-    `;
-
-    try {
-      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${key}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          model: "llama3-8b-8192",
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: text }
-          ],
-          response_format: { type: "json_object" }
-        })
-      });
-
-      const data = await response.json();
-      
-      if (data.error) {
-        addMsg('ai', "Error: " + data.error.message);
-        return;
-      }
-
-      const aiResponse = JSON.parse(data.choices[0].message.content);
-      
-      addMsg('ai', aiResponse.reply);
-      $('reply').textContent = `Reply: ${aiResponse.reply}`;
-      speakAndIdle(aiResponse.reply);
-
-      if (aiResponse.expr && EXPRS.includes(aiResponse.expr)) {
-        state.expr = aiResponse.expr;
-        sync();
-        send({ type: 'cmd', expr: aiResponse.expr });
-      }
-
-    } catch (e) {
-      addMsg('ai', "Connection error.");
-      $('reply').textContent = "Error connecting to AI.";
+    if (cmd) {
+      state.expr = cmd;
+      sync();
+      send({ type:'cmd', expr:cmd });
+      $('reply').textContent = `Command: ${cmd} - ${reply}`;
+      speakAndIdle(reply);
+    } else {
+      $('reply').textContent = `I heard you say: "${text}" but I don't know that command.`;
     }
   }
   
@@ -348,7 +268,6 @@
         const o = objs[0];
         const reply = `That looks like a ${o.class}.`;
         $('reply').textContent = reply;
-        addMsg('ai', reply);
         state.expr = 'curious'; sync();
         send({ type:'cmd', expr:'curious' });
         speakAndIdle(reply);
