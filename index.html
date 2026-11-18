@@ -23,13 +23,13 @@
   .camwrap { position:relative; background:#05080c; border-radius:10px; overflow:hidden; aspect-ratio:4/3; }
   .camwrap video, .camwrap canvas { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
   .camwrap .ph { position:absolute; inset:0; display:grid; place-items:center; color:var(--muted); font-size:13px; padding:12px; text-align:center; }
+  #dets { margin:8px 0 0; padding:0; list-style:none; font-size:13px; font-variant-numeric:tabular-nums; }
+  #dets li { display:flex; justify-content:space-between; padding:2px 0; }
+  #dets li.low { color:var(--muted); }
   .dot { width:9px; height:9px; border-radius:50%; background:var(--bad); display:inline-block; margin-right:6px; }
   .dot.on { background:var(--ok); }
   label.chk { display:inline-flex; gap:6px; align-items:center; color:var(--muted); font-size:13px; cursor:pointer; }
-  #chatLog { height: 120px; overflow-y: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 13px; margin-top: 12px; font-family: monospace; display: none; }
-  .msg { margin-bottom: 4px; }
-  .msg.user { color: var(--accent); }
-  .msg.ai { color: var(--ok); }
+  input[type=range] { flex:1; min-width:100px; accent-color:var(--accent); }
 </style>
 </head>
 <body>
@@ -53,12 +53,18 @@
     <div class="row">
       <input type="text" id="say" placeholder="e.g. look left, be happy, what is this?" spellcheck="false">
       <button class="primary" id="sayBtn">Send</button>
-      <button id="micBtn" title="Click and speak (Chrome/Edge)">🎤</button>
+      <button id="micBtn" title="Click to toggle mic on/off">🎤</button>
     </div>
+    
     <div class="row">
       <label class="chk"><input type="checkbox" id="speak" checked> Speak replies</label>
     </div>
-    <div id="chatLog"></div>
+    <div class="row">
+      <span class="muted" style="font-size:12px;">Pitch</span>
+      <input type="range" id="pitch" min="0.5" max="2.0" step="0.1" value="1.8">
+      <span class="val" id="pitchVal" style="font-size:12px;">1.8</span>
+    </div>
+
     <div id="reply" style="color:var(--muted); font-size:13px; margin-top:8px;"></div>
   </div>
 
@@ -90,12 +96,15 @@
   const state = { expr:'neutral', connected:false };
   let ws = null, nextId = 1, reconnectTimer = null;
   let palVoice = null;
+  
+  // NEW: Boolean to track if we want the mic to stay on
+  let micAlwaysOn = false; 
 
-  // --- Voice Selection (Cute) ---
+  // --- Voice Selection (Cute & Natural) ---
   function loadVoices() {
     const voices = window.speechSynthesis.getVoices();
-    palVoice = voices.find(v => v.name.includes('Google UK English Female')) || 
-               voices.find(v => v.name.includes('Samantha')) || 
+    palVoice = voices.find(v => v.name.includes('Samantha')) || 
+               voices.find(v => v.name.includes('Google UK English Female')) || 
                voices.find(v => v.name.includes('Google US English')) || 
                voices.find(v => v.lang === 'en-US' && v.name.includes('Female')) ||
                voices[0];
@@ -170,102 +179,94 @@
     drawRobot();
   }
 
-  // --- Voice Recognition ---
+  // --- Voice Recognition (Continuous Mode) ---
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (SR) {
     const rec = new SR(); 
     rec.lang = 'en-US'; 
     rec.interimResults = false;
-    let listening = false;
+    rec.continuous = true; // Keep listening even if there's a pause
+
+    rec.onstart = () => { 
+      $('micBtn').classList.add('active'); 
+      $('reply').textContent = 'Listening...'; 
+    };
     
-    rec.onstart = () => { listening = true; $('micBtn').classList.add('active'); $('reply').textContent = 'Listening...'; };
-    rec.onend = () => { listening = false; $('micBtn').classList.remove('active'); };
+    rec.onend = () => { 
+      // If the browser stops listening automatically, restart it IF we still want it on
+      if (micAlwaysOn) {
+        rec.start();
+      } else {
+        $('micBtn').classList.remove('active'); 
+      }
+    };
+    
     rec.onresult = e => { 
-      const txt = e.results[0][0].transcript; 
+      // Get the latest spoken text
+      const txt = e.results[e.results.length - 1][0].transcript; 
       $('say').value = txt; 
       handleSay(txt); 
     };
     
-    $('micBtn').onclick = () => { if (listening) rec.stop(); else rec.start(); };
+    $('micBtn').onclick = () => { 
+      if (micAlwaysOn) {
+        micAlwaysOn = false;
+        rec.stop();
+        $('reply').textContent = 'Mic turned off.';
+      } else {
+        micAlwaysOn = true;
+        rec.start();
+      }
+    };
   }
 
-  // --- AI Brain (Local Rules) ---
-  const chatLog = $('chatLog');
-  function addMsg(role, text) {
-    chatLog.style.display = 'block';
-    const d = document.createElement('div');
-    d.className = 'msg ' + role;
-    d.textContent = (role === 'user' ? 'You: ' : 'P.A.L.: ') + text;
-    chatLog.appendChild(d);
-    chatLog.scrollTop = chatLog.scrollHeight;
-  }
-
+  // --- Voice Output ---
   function speakAndIdle(reply) {
     if ($('speak').checked && 'speechSynthesis' in window) {
       const u = new SpeechSynthesisUtterance(reply); 
       u.voice = palVoice;
-      u.rate = 1.0;
-      u.pitch = 1.4;
+      u.rate = 0.9; 
+      u.pitch = parseFloat($('pitch').value); 
       speechSynthesis.speak(u);
     }
   }
 
+  $('pitch').addEventListener('input', e => {
+    $('pitchVal').textContent = e.target.value;
+  });
+
+  // --- AI Brain (Local) ---
   function handleSay(text) {
-    if (!text) return;
-    
-    const t = text.toLowerCase().replace(/\b(paul|pall|pale)\b/g, 'pal');
-    addMsg('user', text);
-    $('say').value = '';
+    const t = text.toLowerCase().replace(/[.,!?]/g, '').replace(/\b(paul|pall|pale)\b/g, 'pal');
+    let cmd = null;
+    let reply = "";
 
-    // 1. Fast Local Commands for Faces
-    let localCmd = null;
-    if (t.includes('happy') || t.includes('smile') || t.includes('joy') || t.includes('excited')) localCmd = 'happy';
-    else if (t.includes('sad') || t.includes('cry') || t.includes('tears')) localCmd = 'sad';
-    else if (t.includes('angry') || t.includes('mad') || t.includes('furious') || t.includes('rage')) localCmd = 'angry';
-    else if (t.includes('sleep') || t.includes('tired') || t.includes('goodnight')) localCmd = 'sleepy';
-    else if (t.includes('surpris') || t.includes('wow')) localCmd = 'surprised';
-    else if (t.includes('curious') || t.includes('wonder') || t.includes('confused')) localCmd = 'curious';
-    else if (t.includes('neutral') || t.includes('normal')) localCmd = 'neutral';
-
-    if (localCmd) {
-      state.expr = localCmd;
-      sync();
-      send({ type:'cmd', expr:localCmd });
-      const msg = `I am ${localCmd}!`;
-      addMsg('ai', msg);
-      speakAndIdle(msg);
-      return; 
-    }
-
-    // 2. Vision Trigger
-    if (t.includes('what is this') || t.includes('identify') || t.includes('look')) { 
+    if (t.includes('happy') || t.includes('smile') || t.includes('glad')) { cmd = 'happy'; reply = "I am happy!"; }
+    else if (t.includes('sad') || t.includes('cry')) { cmd = 'sad'; reply = "I am sad."; }
+    else if (t.includes('angry') || t.includes('mad') || t.includes('furious')) { cmd = 'angry'; reply = "I am angry!"; }
+    else if (t.includes('sleep') || t.includes('tired')) { cmd = 'sleepy'; reply = "Going to sleep."; }
+    else if (t.includes('surpris') || t.includes('wow')) { cmd = 'surprised'; reply = "Wow!"; }
+    else if (t.includes('curious') || t.includes('hmm') || t.includes('wonder')) { cmd = 'curious'; reply = "I am curious."; }
+    else if (t.includes('neutral') || t.includes('normal')) { cmd = 'neutral'; reply = "Okay."; }
+    else if (t.includes('what is this') || t.includes('identify') || t.includes('look')) { 
       identify(); 
       return; 
     }
+    else if (t.includes('hello') || t.includes('hi') || t.includes('hey')) { reply = "Hey there! What's up?"; }
+    else if (t.includes('joke')) { reply = "Why did the robot go on vacation? It needed to recharge!"; cmd = 'happy'; }
+    else if (t.includes('how are you')) { reply = "I'm feeling electric today!"; }
 
-    // 3. Local Chat Fallback (No API, No Errors)
-    if (t.includes('how are you') || t.includes('how do you feel')) {
-      const msg = "I'm doing great, thanks for asking!";
-      addMsg('ai', msg); speakAndIdle(msg);
-    } else if (t.includes('school') || t.includes('work')) {
-      const msg = "School's going great—lots of fascinating problems to solve!";
-      addMsg('ai', msg); speakAndIdle(msg);
-    } else if (t.includes('weather')) {
-      const msg = "I don't have real-time weather, but I hope it's sunny where you are!";
-      addMsg('ai', msg); speakAndIdle(msg);
-    } else if (t.includes('giza') || t.includes('egypt')) {
-      const msg = "Giza! The pyramids are amazing. I'd love to see them with my camera.";
-      addMsg('ai', msg); speakAndIdle(msg);
-    } else if (t.includes('hello') || t.includes('hi') || t.includes('hey')) {
-      const msg = "Hello! How can I help you today?";
-      addMsg('ai', msg); speakAndIdle(msg);
-    } else if (t.includes('joke')) {
-      const msg = "Why did the robot go on vacation? It needed to recharge!";
-      addMsg('ai', msg); speakAndIdle(msg);
-      state.expr = 'happy'; sync(); send({ type:'cmd', expr:'happy' });
+    if (cmd) {
+      state.expr = cmd;
+      sync();
+      send({ type:'cmd', expr:cmd });
+    }
+
+    if (reply) {
+      $('reply').textContent = reply;
+      speakAndIdle(reply);
     } else {
-      const msg = "I didn't catch that. But I'm ready for your next command!";
-      addMsg('ai', msg); speakAndIdle(msg);
+      $('reply').textContent = `I heard you say: "${text}" but I don't know that command.`;
     }
   }
   
@@ -323,7 +324,7 @@
         $('visStatus').textContent = `I see: ${objs.map(o => o.class).join(', ')}`;
         const o = objs[0];
         const reply = `That looks like a ${o.class}.`;
-        addMsg('ai', reply);
+        $('reply').textContent = reply;
         state.expr = 'curious'; sync();
         send({ type:'cmd', expr:'curious' });
         speakAndIdle(reply);
