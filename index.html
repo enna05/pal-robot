@@ -127,7 +127,6 @@
   $('espIp').value = localStorage.getItem('espIp') || '';
   $('apiKey').value = localStorage.getItem('apiKey') || '';
   
-  // Save Key Listener
   $('saveKeyBtn').onclick = () => {
     const key = $('apiKey').value.trim();
     if (key) {
@@ -243,16 +242,19 @@
     $('pitchVal').textContent = e.target.value;
   });
 
-  // Local Fallback Logic
+  // Local Fallback Logic (Includes ALL faces)
   function localFallback(text) {
     const t = text.toLowerCase();
     let localCmd = null;
     let reply = "";
 
-    if (t.includes('happy') || t.includes('smile')) { localCmd = 'happy'; reply = "I am happy!"; }
+    if (t.includes('happy') || t.includes('smile') || t.includes('glad')) { localCmd = 'happy'; reply = "I am happy!"; }
     else if (t.includes('sad') || t.includes('cry')) { localCmd = 'sad'; reply = "I am sad."; }
-    else if (t.includes('angry') || t.includes('mad')) { localCmd = 'angry'; reply = "I am angry!"; }
+    else if (t.includes('angry') || t.includes('mad') || t.includes('furious')) { localCmd = 'angry'; reply = "I am angry!"; }
     else if (t.includes('sleep') || t.includes('tired')) { localCmd = 'sleepy'; reply = "Going to sleep."; }
+    else if (t.includes('surpris') || t.includes('wow')) { localCmd = 'surprised'; reply = "Wow!"; }
+    else if (t.includes('curious') || t.includes('wonder')) { localCmd = 'curious'; reply = "I am curious."; }
+    else if (t.includes('neutral') || t.includes('normal')) { localCmd = 'neutral'; reply = "Okay."; }
     else if (t.includes('hello') || t.includes('hi')) { reply = "Hello! I am P.A.L."; }
     else { reply = "My AI brain is offline, but I can still change faces!"; }
 
@@ -269,17 +271,40 @@
     if (!text) return;
     
     const t = text.toLowerCase().replace(/\b(paul|pall|pale)\b/g, 'pal');
+    
+    // 1. FAST LOCAL COMMANDS (Instant face change, no AI needed)
+    let localCmd = null;
+    if (t.includes('happy') || t.includes('smile') || t.includes('glad')) localCmd = 'happy';
+    else if (t.includes('sad') || t.includes('cry')) localCmd = 'sad';
+    else if (t.includes('angry') || t.includes('mad') || t.includes('furious')) localCmd = 'angry';
+    else if (t.includes('sleep') || t.includes('tired')) localCmd = 'sleepy';
+    else if (t.includes('surpris') || t.includes('wow')) localCmd = 'surprised';
+    else if (t.includes('curious') || t.includes('wonder')) localCmd = 'curious';
+    else if (t.includes('neutral') || t.includes('normal')) localCmd = 'neutral';
+
+    if (localCmd) {
+      state.expr = localCmd;
+      sync();
+      send({ type:'cmd', expr:localCmd });
+      const reply = `I am ${localCmd}!`;
+      addMsg('user', text);
+      addMsg('ai', reply);
+      speakAndIdle(reply);
+      $('say').value = '';
+      return; // Stop here, don't ask AI
+    }
+
     addMsg('user', text);
     $('say').value = '';
     $('reply').textContent = 'Thinking...';
 
-    // 1. Vision Trigger
+    // 2. Vision Trigger
     if (t.includes('what is this') || t.includes('identify') || t.includes('look')) { 
       identify(); 
       return; 
     }
 
-    // 2. AI Processing (Gemini)
+    // 3. AI Processing (Gemini)
     const key = $('apiKey').value.trim();
     if (!key) {
       localFallback(text);
