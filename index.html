@@ -9,19 +9,26 @@
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 system-ui,-apple-system,sans-serif; }
   header { display:flex; justify-content:space-between; padding:14px 20px; border-bottom:1px solid var(--line); }
-  h1 { margin:0; font-size:20px; }
+  h1 { margin:0; font-size:20px; letter-spacing:.08em; }
   main { display:grid; grid-template-columns:1fr 1fr; gap:16px; padding:20px; max-width:1200px; margin:0 auto; }
   @media (max-width:860px) { main { grid-template-columns:1fr; } }
   .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; }
   .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px; }
   button { font:inherit; color:var(--text); background:var(--card2); border:1px solid var(--line); border-radius:8px; padding:8px 12px; cursor:pointer; }
+  button:hover { border-color:#334155; } button:disabled { opacity:.45; cursor:not-allowed; }
   button.primary { background:var(--accent); border-color:var(--accent); color:#05101f; font-weight:600; }
-  button.active { background:var(--accent); color:#05101f; }
-  input[type=text] { flex:1; background:var(--card2); border:1px solid var(--line); color:var(--text); border-radius:8px; padding:9px; }
+  button.active { background:var(--accent); border-color:var(--accent); color:#05101f; font-weight:600; }
+  input[type=text] { flex:1; min-width:0; background:var(--card2); border:1px solid var(--line); color:var(--text); border-radius:8px; padding:9px 11px; font:inherit; }
+  input[type=text]:focus { outline:2px solid var(--accent); outline-offset:-1px; }
   .camwrap { position:relative; background:#05080c; border-radius:10px; overflow:hidden; aspect-ratio:4/3; }
   .camwrap video, .camwrap canvas { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
-  .dot { width:9px; height:9px; border-radius:50%; background:var(--bad); display:inline-block; }
+  .camwrap .ph { position:absolute; inset:0; display:grid; place-items:center; color:var(--muted); font-size:13px; padding:12px; text-align:center; }
+  #dets { margin:8px 0 0; padding:0; list-style:none; font-size:13px; font-variant-numeric:tabular-nums; }
+  #dets li { display:flex; justify-content:space-between; padding:2px 0; }
+  #dets li.low { color:var(--muted); }
+  .dot { width:9px; height:9px; border-radius:50%; background:var(--bad); display:inline-block; margin-right:6px; }
   .dot.on { background:var(--ok); }
+  label.chk { display:inline-flex; gap:6px; align-items:center; color:var(--muted); font-size:13px; }
 </style>
 </head>
 <body>
@@ -43,9 +50,12 @@
 
     <h2 style="margin-top:20px;">Voice / AI Commands</h2>
     <div class="row">
-      <input type="text" id="say" placeholder="e.g. look left 20 degrees, turn green, what is this?">
+      <input type="text" id="say" placeholder="e.g. look left, be happy, what is this?" spellcheck="false">
       <button class="primary" id="sayBtn">Send</button>
-      <button id="micBtn">🎤</button>
+      <button id="micBtn" title="Click and speak (Chrome/Edge)">🎤</button>
+    </div>
+    <div class="row">
+      <label class="chk"><input type="checkbox" id="speak"> Speak replies</label>
     </div>
     <div id="reply" style="color:var(--muted); font-size:13px; margin-top:8px;"></div>
   </div>
@@ -55,19 +65,29 @@
     <div class="camwrap">
       <video id="cam" playsinline muted></video>
       <canvas id="camBoxes"></canvas>
+      <div class="ph" id="camPh">Camera is off</div>
     </div>
     <div class="row" style="margin-top:10px;">
       <button id="camBtn">Start Camera</button>
       <button class="primary" id="idBtn">Identify Object</button>
+      <span class="muted" style="font-size:12px;">min confidence</span>
+      <input type="range" id="conf" min="20" max="95" step="5" value="50">
+      <span class="val" id="confVal" style="font-size:12px;">50%</span>
     </div>
-    <div id="visStatus" style="font-size:13px; color:var(--muted);"></div>
+    <div id="visStatus" style="font-size:13px; color:var(--muted); margin-top:6px;">Model loads on first use.</div>
+    <ul id="dets"></ul>
     
     <h2 style="margin-top:20px;">ESP32 Connection</h2>
     <div class="row">
-      <input type="text" id="espIp" placeholder="e.g. 192.168.1.45">
+      <input type="text" id="espIp" placeholder="e.g. 192.168.1.45" spellcheck="false">
       <button class="primary" id="connectBtn">Connect</button>
     </div>
   </div>
+
+  <section class="card" style="grid-column:1 / -1;">
+    <h2>Message log</h2>
+    <div id="log" style="height:120px; overflow:auto; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:8px 10px; font:12px/1.5 monospace;"></div>
+  </section>
 </main>
 
 <script>
@@ -76,6 +96,18 @@
   const EXPRS = ['neutral', 'happy', 'curious', 'sleepy', 'surprised', 'sad'];
   const state = { expr:'neutral', connected:false };
   let ws = null, nextId = 1;
+
+  // --- Logging ---
+  const logBox = $('log');
+  function log(cls, text) {
+    const d = document.createElement('div');
+    d.className = cls;
+    const ts = new Date().toLocaleTimeString([], { hour12:false });
+    d.textContent = `${ts} ${text}`;
+    logBox.appendChild(d);
+    while (logBox.childElementCount > 50) logBox.firstChild.remove();
+    logBox.scrollTop = logBox.scrollHeight;
+  }
 
   // --- WebSocket Connection ---
   $('espIp').value = localStorage.getItem('espIp') || '';
@@ -86,24 +118,33 @@
     if (!ip) return alert('Please enter the ESP32 IP address');
     localStorage.setItem('espIp', ip);
     
+    log('sys', 'Connecting to ' + ip);
     $('connText').textContent = 'Connecting...';
+    
     ws = new WebSocket(`ws://${ip}:81`);
+    
     ws.onopen = () => {
       $('dot').className = 'dot on';
       $('connText').textContent = 'Connected';
       state.connected = true;
+      log('sys', 'Connected successfully');
     };
+    
     ws.onclose = () => {
       $('dot').className = 'dot';
       $('connText').textContent = 'Disconnected';
       state.connected = false;
+      log('err', 'Connection closed');
     };
+    
     ws.onmessage = e => {
-      const m = JSON.parse(e.data);
-      if (m.type === 'state') {
-        if (m.expr) state.expr = m.expr;
-        sync();
-      }
+      try {
+        const m = JSON.parse(e.data);
+        if (m.type === 'state') {
+          if (m.expr) state.expr = m.expr;
+          sync();
+        }
+      } catch(err) {}
     };
   }
 
@@ -111,7 +152,9 @@
 
   function send(obj) {
     if (!ws || ws.readyState !== WebSocket.OPEN) return false;
-    ws.send(JSON.stringify({ ...obj, id: nextId++ }));
+    const msg = { ...obj, id: nextId++ };
+    ws.send(JSON.stringify(msg));
+    log('tx', JSON.stringify(msg));
     return true;
   }
 
@@ -128,36 +171,67 @@
     drawRobot();
   }
 
-  // --- AI & Voice ---
+  // --- Voice Recognition ---
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (SR) {
-    const rec = new SR(); rec.lang = 'en-US';
+    const rec = new SR(); 
+    rec.lang = 'en-US'; 
+    rec.interimResults = false;
+    let listening = false;
+    
+    rec.onstart = () => { listening = true; $('micBtn').classList.add('active'); $('reply').textContent = 'Listening...'; };
+    rec.onend = () => { listening = false; $('micBtn').classList.remove('active'); };
+    rec.onerror = e => { $('reply').textContent = 'Mic error: ' + e.error; };
     rec.onresult = e => { 
       const txt = e.results[0][0].transcript; 
       $('say').value = txt; 
       handleSay(txt); 
     };
-    $('micBtn').onclick = () => rec.start();
+    
+    $('micBtn').onclick = () => { if (listening) rec.stop(); else rec.start(); };
   } else {
     $('micBtn').disabled = true;
+    $('micBtn').title = 'Speech recognition not supported in this browser';
+  }
+
+  // --- AI Brain / Text Commands ---
+  function speakAndIdle(reply) {
+    if ($('speak').checked && 'speechSynthesis' in window) {
+      const u = new SpeechSynthesisUtterance(reply); 
+      speechSynthesis.speak(u);
+    }
   }
 
   function handleSay(text) {
-    const t = text.toLowerCase();
+    const t = text.toLowerCase().replace(/[.,!?]/g, '');
     let cmd = null;
-    if (t.includes('happy')) cmd = 'happy';
-    else if (t.includes('sad')) cmd = 'sad';
-    else if (t.includes('sleepy')) cmd = 'sleepy';
-    else if (t.includes('what is this') || t.includes('identify')) { identify(); return; }
+    let reply = "";
+
+    // Check for expressions
+    if (t.includes('happy') || t.includes('smile') || t.includes('glad')) { cmd = 'happy'; reply = "I am happy!"; }
+    else if (t.includes('sad') || t.includes('unhappy')) { cmd = 'sad'; reply = "I am sad."; }
+    else if (t.includes('sleepy') || t.includes('tired') || t.includes('sleep')) { cmd = 'sleepy'; reply = "Going to sleep."; }
+    else if (t.includes('surprise') || t.includes('wow')) { cmd = 'surprised'; reply = "Wow!"; }
+    else if (t.includes('curious') || t.includes('hmm')) { cmd = 'curious'; reply = "I am curious."; }
+    else if (t.includes('neutral') || t.includes('normal')) { cmd = 'neutral'; reply = "Okay."; }
+    
+    // Check for vision commands
+    else if (t.includes('what is this') || t.includes('identify') || t.includes('look')) { 
+      identify(); 
+      return; 
+    }
 
     if (cmd) {
       send({ type:'cmd', expr:cmd });
-      $('reply').textContent = `Command: ${cmd}`;
+      $('reply').textContent = `Command: ${cmd} - ${reply}`;
+      speakAndIdle(reply);
     } else {
-      $('reply').textContent = `Didn't understand: "${text}"`;
+      $('reply').textContent = `I heard you say: "${text}" but I don't know that command.`;
     }
   }
+  
   $('sayBtn').onclick = () => handleSay($('say').value.trim());
+  $('say').addEventListener('keydown', e => { if (e.key === 'Enter') $('sayBtn').click(); });
 
   // --- Vision (COCO-SSD) ---
   let stream = null, modelPromise = null;
@@ -168,7 +242,7 @@
 
   async function loadModel() {
     if (!modelPromise) modelPromise = (async () => {
-      $('visStatus').textContent = 'Loading model...';
+      $('visStatus').textContent = 'Loading object model (needs internet once)...';
       await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js');
       await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js');
       const m = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
@@ -180,61 +254,122 @@
 
   async function startCam() {
     if (stream) return;
-    stream = await navigator.mediaDevices.getUserMedia({ video: true });
-    $('cam').srcObject = stream; await $('cam').play();
+    if (!navigator.mediaDevices) throw new Error('Camera not supported');
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    $('cam').srcObject = stream; 
+    await $('cam').play();
+    $('camPh').style.display = 'none';
     $('camBtn').textContent = 'Stop Camera';
   }
 
   $('camBtn').onclick = async () => {
     if (stream) {
       stream.getTracks().forEach(t => t.stop()); stream = null;
-      $('cam').srcObject = null; $('camBtn').textContent = 'Start Camera';
+      $('cam').srcObject = null; $('camPh').style.display = ''; $('camBtn').textContent = 'Start Camera';
+      $('camBoxes').getContext('2d').clearRect(0, 0, 9999, 9999);
     } else {
+      try { await startCam(); } catch(e) { $('visStatus').textContent = 'Camera error: ' + e.message; }
+    }
+  };
+
+  $('conf').addEventListener('input', e => $('confVal').textContent = e.target.value + '%');
+
+  function drawBoxes(preds, thr) {
+    const v = $('cam'), cv = $('camBoxes'), w = v.videoWidth, h = v.videoHeight;
+    cv.width = w; cv.height = h;
+    const c = cv.getContext('2d'); c.clearRect(0, 0, w, h);
+    c.lineWidth = Math.max(2, w / 240); c.font = `${Math.max(12, w / 40)}px system-ui,sans-serif`;
+    for (const p of preds) {
+      const ok = p.score >= thr, [x, y, bw, bh] = p.bbox;
+      c.strokeStyle = ok ? '#22c55e' : '#8b97a8'; c.strokeRect(x, y, bw, bh);
+      c.fillStyle = ok ? '#22c55e' : '#8b97a8';
+      c.fillText(`${p.class} ${Math.round(p.score * 100)}%`, x + 4, Math.max(14, y - 4));
+    }
+  }
+
+  async function identify() {
+    try {
       await startCam();
+      const model = await loadModel();
+      const v = $('cam');
+      if (v.readyState < 2) await new Promise(r => v.addEventListener('loadeddata', r, { once:true }));
+      
+      const thr = +$('conf').value / 100;
+      const preds = (await model.detect(v, 10)).sort((a, b) => b.score - a.score);
+      drawBoxes(preds, thr);
+      
+      $('dets').innerHTML = '';
+      for (const p of preds.slice(0, 5)) {
+        const li = document.createElement('li'); if (p.score < thr) li.className = 'low';
+        li.innerHTML = '<span></span><span></span>'; li.children[0].textContent = p.class;
+        li.children[1].textContent = Math.round(p.score * 100) + '%'; $('dets').appendChild(li);
+      }
+      
+      const objs = preds.filter(p => p.score >= thr).map(p => ({ class:p.class, score:+p.score.toFixed(2) }));
+      
+      if (objs.length > 0) {
+        $('visStatus').textContent = `I see: ${objs.map(o => o.class).join(', ')}`;
+        const o = objs[0];
+        const reply = `${o.score < 0.6 ? 'I think that might be' : 'That looks like'} a ${o.class}.`;
+        $('reply').textContent = reply;
+        send({ type:'cmd', expr:'curious' });
+        speakAndIdle(reply);
+      } else {
+        $('visStatus').textContent = 'Nothing above the confidence threshold';
+        $('reply').textContent = "I can't tell what that is.";
+        send({ type:'cmd', expr:'sad' });
+        speakAndIdle("I can't tell what that is.");
+      }
+    } catch(e) {
+      $('visStatus').textContent = 'Error: ' + e.message;
     }
-  };
+  }
 
-  $('idBtn').onclick = async () => {
-    await startCam();
-    const model = await loadModel();
-    const preds = await model.detect($('cam'));
-    if (preds.length > 0) {
-      $('visStatus').textContent = `I see: ${preds[0].class} (${Math.round(preds[0].score*100)}%)`;
-      send({ type:'cmd', expr:'surprised' });
-    } else {
-      $('visStatus').textContent = 'I don\'t see anything I recognize.';
-    }
-  };
+  $('idBtn').onclick = identify;
 
-  // --- Drawing ---
+  // --- Drawing (Virtual Robot) ---
   const rc = $('robot').getContext('2d');
   function drawRobot() {
     const c = rc, W = 560, H = 340;
     c.clearRect(0, 0, W, H);
     
-    // Draw face
+    // Draw face background
     c.fillStyle = '#0d1218';
     c.beginPath(); c.roundRect(80, 50, 400, 240, 40); c.fill();
     c.strokeStyle = '#2a3441'; c.lineWidth = 3; c.stroke();
     
-    const eyeColor = '#8ee8ff';
+    const eyeColor = state.connected ? '#8ee8ff' : '#4b5563';
     c.fillStyle = eyeColor;
     
+    // Draw expressions
     if (state.expr === 'happy') {
-      c.beginPath(); c.arc(200, 140, 30, 0, Math.PI*2); c.fill();
-      c.beginPath(); c.arc(360, 140, 30, 0, Math.PI*2); c.fill();
-      c.beginPath(); c.arc(280, 190, 40, 0, Math.PI); c.strokeStyle = eyeColor; c.lineWidth = 8; c.stroke();
+      c.beginPath(); c.arc(200, 140, 30, Math.PI, 0); c.strokeStyle = eyeColor; c.lineWidth = 8; c.stroke(); // happy eyes
+      c.beginPath(); c.arc(360, 140, 30, Math.PI, 0); c.stroke();
+      c.beginPath(); c.arc(280, 190, 40, 0, Math.PI); c.stroke(); // smile
     } else if (state.expr === 'sad') {
       c.fillRect(170, 130, 60, 10);
       c.fillRect(330, 130, 60, 10);
-      c.beginPath(); c.arc(280, 210, 40, Math.PI, 0); c.strokeStyle = eyeColor; c.lineWidth = 8; c.stroke();
+      c.beginPath(); c.arc(280, 210, 40, Math.PI, 0); c.strokeStyle = eyeColor; c.lineWidth = 8; c.stroke(); // frown
+    } else if (state.expr === 'sleepy') {
+      c.fillRect(170, 140, 60, 8);
+      c.fillRect(330, 140, 60, 8);
+      c.beginPath(); c.arc(280, 190, 15, 0, Math.PI*2); c.fill(); // small mouth
+    } else if (state.expr === 'surprised') {
+      c.beginPath(); c.arc(200, 140, 35, 0, Math.PI*2); c.fill();
+      c.beginPath(); c.arc(360, 140, 35, 0, Math.PI*2); c.fill();
+      c.beginPath(); c.arc(280, 200, 20, 0, Math.PI*2); c.strokeStyle = eyeColor; c.lineWidth = 6; c.stroke(); // O mouth
+    } else if (state.expr === 'curious') {
+      c.beginPath(); c.arc(200, 140, 20, 0, Math.PI*2); c.fill(); // small eye
+      c.beginPath(); c.arc(360, 140, 40, 0, Math.PI*2); c.fill(); // big eye
+      c.beginPath(); c.moveTo(260, 200); c.lineTo(300, 190); c.strokeStyle = eyeColor; c.lineWidth = 6; c.stroke(); // slanted mouth
     } else {
-      c.beginPath(); c.arc(200, 140, 40, 0, Math.PI*2); c.fill();
-      c.beginPath(); c.arc(360, 140, 40, 0, Math.PI*2); c.fill();
+      c.beginPath(); c.arc(200, 140, 30, 0, Math.PI*2); c.fill();
+      c.beginPath(); c.arc(360, 140, 30, 0, Math.PI*2); c.fill();
+      c.fillRect(250, 190, 60, 8); // straight mouth
     }
   }
   
-  drawRobot();
+  sync();
 })();
 </script>
 </body>
