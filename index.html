@@ -104,10 +104,9 @@
   let ws = null, nextId = 1, reconnectTimer = null;
   let palVoice = null;
 
-  // --- Voice Selection (Cuter, higher-pitched voice) ---
+  // --- Voice Selection ---
   function loadVoices() {
     const voices = window.speechSynthesis.getVoices();
-    // Priority: Cute female English voices
     palVoice = voices.find(v => v.name.includes('Google UK English Female')) || 
                voices.find(v => v.name.includes('Samantha')) || 
                voices.find(v => v.name.includes('Google US English')) || 
@@ -219,8 +218,8 @@
     if ($('speak').checked && 'speechSynthesis' in window) {
       const u = new SpeechSynthesisUtterance(reply); 
       u.voice = palVoice;
-      u.rate = 1.0;   // Normal speed
-      u.pitch = 1.4;  // Higher pitch for cute voice
+      u.rate = 1.0;
+      u.pitch = 1.4;
       speechSynthesis.speak(u);
     }
   }
@@ -232,12 +231,12 @@
     
     // --- 1. FAST LOCAL COMMANDS (Instant face change) ---
     let localCmd = null;
-    if (t.includes('happy') || t.includes('smile')) localCmd = 'happy';
-    else if (t.includes('sad') || t.includes('cry')) localCmd = 'sad';
-    else if (t.includes('angry') || t.includes('mad')) localCmd = 'angry';
-    else if (t.includes('sleep') || t.includes('tired')) localCmd = 'sleepy';
+    if (t.includes('happy') || t.includes('smile') || t.includes('joy') || t.includes('excited')) localCmd = 'happy';
+    else if (t.includes('sad') || t.includes('cry') || t.includes('tears')) localCmd = 'sad';
+    else if (t.includes('angry') || t.includes('mad') || t.includes('furious') || t.includes('rage')) localCmd = 'angry';
+    else if (t.includes('sleep') || t.includes('tired') || t.includes('goodnight')) localCmd = 'sleepy';
     else if (t.includes('surpris') || t.includes('wow')) localCmd = 'surprised';
-    else if (t.includes('curious') || t.includes('wonder')) localCmd = 'curious';
+    else if (t.includes('curious') || t.includes('wonder') || t.includes('confused')) localCmd = 'curious';
     else if (t.includes('neutral') || t.includes('normal')) localCmd = 'neutral';
 
     if (localCmd) {
@@ -299,7 +298,7 @@
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          model: "llama-3.1-8b-instant",
+          model: "llama-3.3-70b-versatile", // <--- UPDATED MODEL
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: text }
