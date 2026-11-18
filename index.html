@@ -26,6 +26,7 @@
   .dot { width:9px; height:9px; border-radius:50%; background:var(--bad); display:inline-block; margin-right:6px; }
   .dot.on { background:var(--ok); }
   label.chk { display:inline-flex; gap:6px; align-items:center; color:var(--muted); font-size:13px; cursor:pointer; }
+  input[type=range] { flex:1; min-width:100px; accent-color:var(--accent); }
   #chatLog { height: 120px; overflow-y: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 13px; margin-top: 12px; font-family: monospace; display: none; }
   .msg { margin-bottom: 4px; }
   .msg.user { color: var(--accent); }
@@ -55,9 +56,16 @@
       <button class="primary" id="sayBtn">Send</button>
       <button id="micBtn" title="Click and speak (Chrome/Edge)">🎤</button>
     </div>
+    
     <div class="row">
       <label class="chk"><input type="checkbox" id="speak" checked> Speak replies</label>
     </div>
+    <div class="row">
+      <span class="muted" style="font-size:12px;">Voice Pitch</span>
+      <input type="range" id="pitch" min="0.5" max="2.0" step="0.1" value="1.8">
+      <span class="val" id="pitchVal" style="font-size:12px;">1.8</span>
+    </div>
+
     <div id="chatLog"></div>
     <div id="reply" style="color:var(--muted); font-size:13px; margin-top:8px;"></div>
   </div>
@@ -91,13 +99,15 @@
   let ws = null, nextId = 1, reconnectTimer = null;
   let palVoice = null;
 
-  // --- Voice Selection (Cute) ---
+  // --- Voice Selection (Aggressively search for a cute female voice) ---
   function loadVoices() {
     const voices = window.speechSynthesis.getVoices();
+    // Look for female/cute sounding voices first
     palVoice = voices.find(v => v.name.includes('Google UK English Female')) || 
                voices.find(v => v.name.includes('Samantha')) || 
                voices.find(v => v.name.includes('Google US English')) || 
                voices.find(v => v.lang === 'en-US' && v.name.includes('Female')) ||
+               voices.find(v => v.name.includes('Zira')) ||
                voices[0];
   }
   if ('speechSynthesis' in window) {
@@ -204,11 +214,16 @@
     if ($('speak').checked && 'speechSynthesis' in window) {
       const u = new SpeechSynthesisUtterance(reply); 
       u.voice = palVoice;
-      u.rate = 1.0;
-      u.pitch = 1.4;
+      u.rate = 1.1; // Slightly faster for cuteness
+      u.pitch = parseFloat($('pitch').value); // Use the slider!
       speechSynthesis.speak(u);
     }
   }
+
+  // Pitch Slider listener
+  $('pitch').addEventListener('input', e => {
+    $('pitchVal').textContent = e.target.value;
+  });
 
   function handleSay(text) {
     if (!text) return;
@@ -217,7 +232,6 @@
     addMsg('user', text);
     $('say').value = '';
 
-    // 1. Fast Local Commands for Faces
     let localCmd = null;
     if (t.includes('happy') || t.includes('smile') || t.includes('joy') || t.includes('excited')) localCmd = 'happy';
     else if (t.includes('sad') || t.includes('cry') || t.includes('tears')) localCmd = 'sad';
@@ -234,16 +248,14 @@
       const msg = `I am ${localCmd}!`;
       addMsg('ai', msg);
       speakAndIdle(msg);
-      return; 
+      return;
     }
 
-    // 2. Vision Trigger
     if (t.includes('what is this') || t.includes('identify') || t.includes('look')) { 
       identify(); 
       return; 
     }
 
-    // 3. Local Chat Fallback (No API, No Errors)
     if (t.includes('how are you') || t.includes('how do you feel')) {
       const msg = "I'm doing great, thanks for asking!";
       addMsg('ai', msg); speakAndIdle(msg);
