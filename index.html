@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P.A.L. Controller</title>
+<style>
+  :root { --bg:#0b0f14; --card:#121821; --card2:#18202b; --line:#222d3b; --text:#e5e7eb; --muted:#8b97a8; --accent:#4f9dff; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 system-ui,-apple-system,sans-serif; }
+  header { display:flex; justify-content:space-between; padding:14px 20px; border-bottom:1px solid var(--line); }
+  h1 { margin:0; font-size:20px; }
+  main { display:grid; grid-template-columns:1fr 1fr; gap:16px; padding:20px; max-width:1200px; margin:0 auto; }
+  @media (max-width:860px) { main { grid-template-columns:1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:12px; }
+  button { font:inherit; color:var(--text); background:var(--card2); border:1px solid var(--line); border-radius:8px; padding:8px 12px; cursor:pointer; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#05101f; font-weight:600; }
+  button.active { background:var(--accent); color:#05101f; }
+  input[type=text] { flex:1; background:var(--card2); border:1px solid var(--line); color:var(--text); border-radius:8px; padding:9px; }
+  .camwrap { position:relative; background:#05080c; border-radius:10px; overflow:hidden; aspect-ratio:4/3; }
+  .camwrap video, .camwrap canvas { position:absolute; inset:0; width:100%; height:100%; object-fit:contain; }
+  .dot { width:9px; height:9px; border-radius:50%; background:var(--bad); display:inline-block; }
+  .dot.on { background:var(--ok); }
+</style>
+</head>
+<body>
+<header>
+  <h1>P.A.L. Controller</h1>
+  <div class="row" style="margin:0">
+    <span class="dot" id="dot"></span>
+    <span id="connText">Disconnected</span>
+  </div>
+</header>
+
+<main>
+  <div class="card">
+    <h2>Robot View</h2>
+    <canvas id="robot" width="560" height="340" style="width:100%; border-radius:10px;"></canvas>
+    
+    <h2 style="margin-top:20px;">Expression</h2>
+    <div class="row" id="exprs"></div>
+
+    <h2 style="margin-top:20px;">Voice / AI Commands</h2>
+    <div class="row">
+      <input type="text" id="say" placeholder="e.g. look left 20 degrees, turn green, what is this?">
+      <button class="primary" id="sayBtn">Send</button>
+      <button id="micBtn">🎤</button>
+    </div>
+    <div id="reply" style="color:var(--muted); font-size:13px; margin-top:8px;"></div>
+  </div>
+
+  <div class="card">
+    <h2>Camera & Vision</h2>
+    <div class="camwrap">
+      <video id="cam" playsinline muted></video>
+      <canvas id="camBoxes"></canvas>
+    </div>
+    <div class="row" style="margin-top:10px;">
+      <button id="camBtn">Start Camera</button>
+      <button class="primary" id="idBtn">Identify Object</button>
+    </div>
+    <div id="visStatus" style="font-size:13px; color:var(--muted);"></div>
+    
+    <h2 style="margin-top:20px;">ESP32 Connection</h2>
+    <div class="row">
+      <input type="text" id="espIp" placeholder="e.g. 192.168.1.45">
+      <button class="primary" id="connectBtn">Connect</button>
+    </div>
+  </div>
+</main>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const EXPRS = ['neutral', 'happy', 'curious', 'sleepy', 'surprised', 'sad'];
+  const state = { expr:'neutral', connected:false };
+  let ws = null, nextId = 1;
+
+  // --- WebSocket Connection ---
+  $('espIp').value = localStorage.getItem('espIp') || '';
+  
+  function connect() {
+    if (ws) { ws.close(); ws = null; }
+    const ip = $('espIp').value.trim();
+    if (!ip) return alert('Please enter the ESP32 IP address');
+    localStorage.setItem('espIp', ip);
+    
+    $('connText').textContent = 'Connecting...';
+    ws = new WebSocket(`ws://${ip}:81`);
+    ws.onopen = () => {
+      $('dot').className = 'dot on';
+      $('connText').textContent = 'Connected';
+      state.connected = true;
+    };
+    ws.onclose = () => {
+      $('dot').className = 'dot';
+      $('connText').textContent = 'Disconnected';
+      state.connected = false;
+    };
+    ws.onmessage = e => {
+      const m = JSON.parse(e.data);
+      if (m.type === 'state') {
+        if (m.expr) state.expr = m.expr;
+        sync();
+      }
+    };
+  }
+
+  $('connectBtn').onclick = connect;
+
+  function send(obj) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    ws.send(JSON.stringify({ ...obj, id: nextId++ }));
+    return true;
+  }
+
+  // --- UI Controls ---
+  EXPRS.forEach(e => {
+    const b = document.createElement('button');
+    b.textContent = e; b.dataset.expr = e; 
+    b.onclick = () => send({ type:'cmd', expr:e });
+    $('exprs').appendChild(b);
+  });
+
+  function sync() {
+    document.querySelectorAll('[data-expr]').forEach(b => b.classList.toggle('active', b.dataset.expr === state.expr));
+    drawRobot();
+  }
+
+  // --- AI & Voice ---
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (SR) {
+    const rec = new SR(); rec.lang = 'en-US';
+    rec.onresult = e => { 
+      const txt = e.results[0][0].transcript; 
+      $('say').value = txt; 
+      handleSay(txt); 
+    };
+    $('micBtn').onclick = () => rec.start();
+  } else {
+    $('micBtn').disabled = true;
+  }
+
+  function handleSay(text) {
+    const t = text.toLowerCase();
+    let cmd = null;
+    if (t.includes('happy')) cmd = 'happy';
+    else if (t.includes('sad')) cmd = 'sad';
+    else if (t.includes('sleepy')) cmd = 'sleepy';
+    else if (t.includes('what is this') || t.includes('identify')) { identify(); return; }
+
+    if (cmd) {
+      send({ type:'cmd', expr:cmd });
+      $('reply').textContent = `Command: ${cmd}`;
+    } else {
+      $('reply').textContent = `Didn't understand: "${text}"`;
+    }
+  }
+  $('sayBtn').onclick = () => handleSay($('say').value.trim());
+
+  // --- Vision (COCO-SSD) ---
+  let stream = null, modelPromise = null;
+  const loadScript = src => new Promise((ok, fail) => {
+    const el = document.createElement('script'); el.src = src; el.onload = ok;
+    el.onerror = fail; document.head.appendChild(el);
+  });
+
+  async function loadModel() {
+    if (!modelPromise) modelPromise = (async () => {
+      $('visStatus').textContent = 'Loading model...';
+      await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js');
+      await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js');
+      const m = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
+      $('visStatus').textContent = 'Model ready';
+      return m;
+    })();
+    return modelPromise;
+  }
+
+  async function startCam() {
+    if (stream) return;
+    stream = await navigator.mediaDevices.getUserMedia({ video: true });
+    $('cam').srcObject = stream; await $('cam').play();
+    $('camBtn').textContent = 'Stop Camera';
+  }
+
+  $('camBtn').onclick = async () => {
+    if (stream) {
+      stream.getTracks().forEach(t => t.stop()); stream = null;
+      $('cam').srcObject = null; $('camBtn').textContent = 'Start Camera';
+    } else {
+      await startCam();
+    }
+  };
+
+  $('idBtn').onclick = async () => {
+    await startCam();
+    const model = await loadModel();
+    const preds = await model.detect($('cam'));
+    if (preds.length > 0) {
+      $('visStatus').textContent = `I see: ${preds[0].class} (${Math.round(preds[0].score*100)}%)`;
+      send({ type:'cmd', expr:'surprised' });
+    } else {
+      $('visStatus').textContent = 'I don\'t see anything I recognize.';
+    }
+  };
+
+  // --- Drawing ---
+  const rc = $('robot').getContext('2d');
+  function drawRobot() {
+    const c = rc, W = 560, H = 340;
+    c.clearRect(0, 0, W, H);
+    
+    // Draw face
+    c.fillStyle = '#0d1218';
+    c.beginPath(); c.roundRect(80, 50, 400, 240, 40); c.fill();
+    c.strokeStyle = '#2a3441'; c.lineWidth = 3; c.stroke();
+    
+    const eyeColor = '#8ee8ff';
+    c.fillStyle = eyeColor;
+    
+    if (state.expr === 'happy') {
+      c.beginPath(); c.arc(200, 140, 30, 0, Math.PI*2); c.fill();
+      c.beginPath(); c.arc(360, 140, 30, 0, Math.PI*2); c.fill();
+      c.beginPath(); c.arc(280, 190, 40, 0, Math.PI); c.strokeStyle = eyeColor; c.lineWidth = 8; c.stroke();
+    } else if (state.expr === 'sad') {
+      c.fillRect(170, 130, 60, 10);
+      c.fillRect(330, 130, 60, 10);
+      c.beginPath(); c.arc(280, 210, 40, Math.PI, 0); c.strokeStyle = eyeColor; c.lineWidth = 8; c.stroke();
+    } else {
+      c.beginPath(); c.arc(200, 140, 40, 0, Math.PI*2); c.fill();
+      c.beginPath(); c.arc(360, 140, 40, 0, Math.PI*2); c.fill();
+    }
+  }
+  
+  drawRobot();
+})();
+</script>
+</body>
+</html>
